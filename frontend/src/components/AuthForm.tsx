@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Eye, EyeOff, Loader2, Mail, User } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { isDesignatedAdmin } from "@/lib/auth-config";
 import AsciiRainBackdrop from "@/components/AsciiRainBackdrop";
 
 type Mode = "login" | "register" | "forgot" | "reset";
@@ -79,9 +80,9 @@ export default function AuthForm({ mode: initialMode = "login" }: { mode?: Mode 
         }
 
         const userEmail = (authData.user.email || "").toLowerCase();
-        const isDesignatedAdmin = userEmail === "akarsh.bhatt2007@gmail.com";
+        const adminUser = isDesignatedAdmin(userEmail);
         const isApproved =
-          isDesignatedAdmin ||
+          adminUser ||
           authData.user.app_metadata?.is_approved === true ||
           authData.user.user_metadata?.is_approved === true;
 

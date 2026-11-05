@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { isDesignatedAdmin, DESIGNATED_ADMIN_NAME } from "@/lib/auth-config";
 import AsciiRainBackdrop from "@/components/AsciiRainBackdrop";
 
 type Form = {
@@ -88,10 +89,10 @@ export default function DashboardPage() {
         const email = (user.email || "").toLowerCase();
         setUserEmail(user.email || null);
 
-        const isDesignatedAdmin = email === "akarsh.bhatt2007@gmail.com";
+        const adminUser = isDesignatedAdmin(email);
 
         // Verify account approval status for non-admin users
-        if (!isDesignatedAdmin) {
+        if (!adminUser) {
           const isApproved =
             user.app_metadata?.is_approved === true ||
             user.user_metadata?.is_approved === true;
@@ -118,8 +119,8 @@ export default function DashboardPage() {
         }
 
         // Retrieve real name
-        if (isDesignatedAdmin) {
-          setUserFullName("Akarsh");
+        if (adminUser) {
+          setUserFullName(DESIGNATED_ADMIN_NAME);
         } else {
           const metaName =
             user.user_metadata?.full_name ||
@@ -133,7 +134,7 @@ export default function DashboardPage() {
         }
 
         // Designated admin loads pending account approval requests via secure endpoint
-        if (isDesignatedAdmin) {
+        if (adminUser) {
           try {
             const res = await fetch("/api/admin/users");
             if (res.ok) {
@@ -444,8 +445,8 @@ export default function DashboardPage() {
             </div>
 
             <div className="flex items-center gap-3">
-              {/* Admin Approvals Button (Visible only to designated admin Akarsh) */}
-              {(userEmail || "").toLowerCase() === "akarsh.bhatt2007@gmail.com" && (
+              {/* Admin Approvals Button (Visible only to designated admin) */}
+              {isDesignatedAdmin(userEmail) && (
                 <button
                   type="button"
                   onClick={() => setShowApprovalsModal(true)}

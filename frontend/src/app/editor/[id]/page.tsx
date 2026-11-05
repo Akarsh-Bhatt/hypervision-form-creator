@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useMemo } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { isDesignatedAdmin } from "@/lib/auth-config";
 import AsciiRainBackdrop from "@/components/AsciiRainBackdrop";
 import { parseScaleConfig, serializeScaleConfig, type ScaleConfig } from "@/lib/scale";
 
@@ -156,9 +157,9 @@ export default function FormEditorPage() {
 
         // Verify account approval status
         const userEmail = (session.user.email || "").toLowerCase();
-        const isDesignatedAdmin = userEmail === "akarsh.bhatt2007@gmail.com";
+        const adminUser = isDesignatedAdmin(userEmail);
         const isApproved =
-          isDesignatedAdmin ||
+          adminUser ||
           session.user.app_metadata?.is_approved === true ||
           session.user.user_metadata?.is_approved === true;
 

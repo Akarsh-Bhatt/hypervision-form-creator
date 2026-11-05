@@ -1,6 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { isDesignatedAdmin } from "@/lib/auth-config";
+
 function sanitizeSupabaseUrl(url: string): string {
   return url.replace(/\/rest\/v1\/?$/, "").replace(/\/+$/, "");
 }
@@ -78,10 +80,9 @@ export async function middleware(request: NextRequest) {
     user = null;
   }
 
-  const userEmail = (user?.email || "").toLowerCase();
-  const isDesignatedAdmin = userEmail === "akarsh.bhatt2007@gmail.com";
+  const adminUser = isDesignatedAdmin(user?.email);
   const isApproved =
-    isDesignatedAdmin ||
+    adminUser ||
     user?.app_metadata?.is_approved === true ||
     user?.user_metadata?.is_approved === true;
 
