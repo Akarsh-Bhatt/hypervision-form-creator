@@ -43,7 +43,7 @@ type Question = {
 
 type Form = {
   id: string;
-  creator_id: string;
+  creator_id?: string;
   shareable_slug: string;
   title: string;
   description: string;
@@ -185,20 +185,30 @@ export default function PublicFormPage() {
       try {
         const supabase = createClient();
 
-        // 1. Fetch form by slug or fallback by ID
-        let { data: formData } = await supabase
-          .from("forms")
-          .select("id, creator_id, shareable_slug, title, description, status")
-          .eq("shareable_slug", slug)
-          .maybeSingle();
+        // 1. Fetch form using secure RPC (SEC-04) or scoped fallback without creator_id
+        let formData: Form | null = null;
+        const { data: rpcData, error: rpcError } = await supabase.rpc("get_public_form", {
+          p_identifier: slug,
+        });
 
-        if (!formData) {
-          const res = await supabase
+        if (!rpcError && rpcData && rpcData.length > 0) {
+          formData = rpcData[0] as Form;
+        } else {
+          let { data } = await supabase
             .from("forms")
-            .select("id, creator_id, shareable_slug, title, description, status")
-            .eq("id", slug)
+            .select("id, shareable_slug, title, description, status")
+            .eq("shareable_slug", slug)
             .maybeSingle();
-          formData = res.data;
+
+          if (!data) {
+            const res = await supabase
+              .from("forms")
+              .select("id, shareable_slug, title, description, status")
+              .eq("id", slug)
+              .maybeSingle();
+            data = res.data;
+          }
+          formData = data as Form | null;
         }
 
         if (!formData) {
@@ -327,40 +337,103 @@ export default function PublicFormPage() {
         Math.round((Date.now() - startTimeRef.current) / 1000)
       );
 
-      // 3. Insert into form_responses with authenticated respondent email
-      const { data: responseRecord, error: respError } = await supabase
-        .from("form_responses")
-        .insert({
-          form_id: form.id,
-          sap_id: trimmedEmail.toLowerCase(),
-          completion_time_seconds: completionSeconds,
-        })
-        .select()
-        .single();
-
-      if (respError) throw respError;
-
-      // 3. Batch insert answers into form_answers
+      // Prepare structured answers payload (SEC-02, SEC-10)
       const answerPayloads = questions
         .filter((q) => answers[q.id] !== undefined && answers[q.id] !== "")
         .map((q) => ({
-          response_id: responseRecord.id,
           question_id: q.id,
           answer_value: answers[q.id],
         }));
 
-      if (answerPayloads.length > 0) {
-        const { error: ansError } = await supabase
-          .from("form_answers")
-          .insert(answerPayloads);
+      // 3. Submit atomically via secure RPC (SEC-02, SEC-03, SEC-10)
+      const { data: rpcResult, error: rpcError } = await supabase.rpc(
+        "submit_form_response",
+        {
+          p_form_id: form.id,
+          p_respondent_email: trimmedEmail.toLowerCase(),
+          p_completion_seconds: completionSeconds,
+          p_answers: answerPayloads,
+        }
+      );
 
-        if (ansError) throw ansError;
+      if (rpcError) {
+        const errorMsg = rpcError.message || "";
+        // If the error was a validated business logic rule (closed, response limit, or required check)
+        if (
+          errorMsg.includes("closed") ||
+          errorMsg.includes("maximum response capacity") ||
+          errorMsg.includes("must be answered")
+        ) {
+          alert(errorMsg);
+          setSubmitting(false);
+          return;
+        }
+
+        // Graceful fallback to direct insert without requiring SELECT permissions
+        const responseId = crypto.randomUUID();
+
+        // 3a. Insert response record with client-side UUID (bypasses .select().single() RLS block)
+        let insertPayload: any = {
+          id: responseId,
+          form_id: form.id,
+          sap_id: trimmedEmail.toLowerCase(),
+          completion_time_seconds: completionSeconds,
+        };
+
+        let { error: respError } = await supabase
+          .from("form_responses")
+          .insert(insertPayload);
+
+        // If sap_id column doesn't exist on legacy schemas, retry with respondent_ip
+        if (
+          respError &&
+          (respError.message?.includes("sap_id") || respError.details?.includes("sap_id"))
+        ) {
+          insertPayload = {
+            id: responseId,
+            form_id: form.id,
+            respondent_ip: trimmedEmail.toLowerCase(),
+            completion_time_seconds: completionSeconds,
+          };
+          const retry = await supabase.from("form_responses").insert(insertPayload);
+          respError = retry.error;
+        }
+
+        if (respError) {
+          throw new Error(respError.message || respError.details || JSON.stringify(respError));
+        }
+
+        // 3b. Batch insert answers using the known responseId
+        if (answerPayloads.length > 0) {
+          const directPayloads = answerPayloads.map((a) => ({
+            id: crypto.randomUUID(),
+            response_id: responseId,
+            question_id: a.question_id,
+            answer_value: a.answer_value,
+          }));
+
+          const { error: ansError } = await supabase
+            .from("form_answers")
+            .insert(directPayloads);
+
+          if (ansError) {
+            throw new Error(ansError.message || ansError.details || JSON.stringify(ansError));
+          }
+        }
       }
 
       setIsSubmitted(true);
-    } catch (err) {
-      console.error("Submission error:", err);
-      alert("An error occurred while submitting your response. Please try again.");
+    } catch (err: any) {
+      const errMsg =
+        err?.message ||
+        err?.details ||
+        (typeof err === "object" ? JSON.stringify(err) : String(err));
+      console.error("Submission error:", errMsg, err);
+      alert(
+        errMsg && errMsg !== "{}"
+          ? `Submission failed: ${errMsg}`
+          : "An error occurred while submitting your response. Please try again."
+      );
     } finally {
       setSubmitting(false);
     }

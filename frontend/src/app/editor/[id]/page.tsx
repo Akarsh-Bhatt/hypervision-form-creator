@@ -154,6 +154,34 @@ export default function FormEditorPage() {
           return;
         }
 
+        // Verify account approval status
+        const userEmail = (session.user.email || "").toLowerCase();
+        const isDesignatedAdmin = userEmail === "akarsh.bhatt2007@gmail.com";
+        const isApproved =
+          isDesignatedAdmin ||
+          session.user.app_metadata?.is_approved === true ||
+          session.user.user_metadata?.is_approved === true;
+
+        if (!isApproved) {
+          try {
+            const { data: profile } = await supabase
+              .from("profiles")
+              .select("is_approved")
+              .eq("id", session.user.id)
+              .maybeSingle();
+
+            if (!profile?.is_approved) {
+              await supabase.auth.signOut();
+              router.push("/?error=pending_approval");
+              return;
+            }
+          } catch {
+            await supabase.auth.signOut();
+            router.push("/?error=pending_approval");
+            return;
+          }
+        }
+
         const { data: formData, error: formError } = await supabase
           .from("forms")
           .select("*")

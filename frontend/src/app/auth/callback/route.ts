@@ -6,10 +6,19 @@ function sanitizeSupabaseUrl(url: string): string {
   return url.replace(/\/rest\/v1\/?$/, "").replace(/\/+$/, "");
 }
 
+function getSafeRedirectPath(nextParam: string | null): string {
+  if (!nextParam) return "/dashboard";
+  // Must start with a single slash, not protocol-relative (//), and contain no backslashes
+  if (!nextParam.startsWith("/") || nextParam.startsWith("//") || nextParam.includes("\\")) {
+    return "/dashboard";
+  }
+  return nextParam;
+}
+
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/dashboard";
+  const next = getSafeRedirectPath(searchParams.get("next"));
 
   if (code) {
     const cookieStore = await cookies();

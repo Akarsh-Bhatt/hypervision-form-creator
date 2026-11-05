@@ -78,20 +78,42 @@ export async function middleware(request: NextRequest) {
     user = null;
   }
 
-  if (protectedRoute && !user) {
-    const destination = request.nextUrl.clone();
-    destination.pathname = "/";
-    destination.searchParams.set("next", path);
+  const userEmail = (user?.email || "").toLowerCase();
+  const isDesignatedAdmin = userEmail === "akarsh.bhatt2007@gmail.com";
+  const isApproved =
+    isDesignatedAdmin ||
+    user?.app_metadata?.is_approved === true ||
+    user?.user_metadata?.is_approved === true;
 
-    const redirectResponse = NextResponse.redirect(destination);
-    response.cookies.getAll().forEach((cookie) => {
-      redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
-    });
+  if (protectedRoute) {
+    if (!user) {
+      const destination = request.nextUrl.clone();
+      destination.pathname = "/";
+      destination.searchParams.set("next", path);
 
-    return redirectResponse;
+      const redirectResponse = NextResponse.redirect(destination);
+      response.cookies.getAll().forEach((cookie) => {
+        redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
+      });
+
+      return redirectResponse;
+    }
+
+    if (!isApproved) {
+      const destination = request.nextUrl.clone();
+      destination.pathname = "/";
+      destination.searchParams.set("error", "pending_approval");
+
+      const redirectResponse = NextResponse.redirect(destination);
+      response.cookies.getAll().forEach((cookie) => {
+        redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
+      });
+
+      return redirectResponse;
+    }
   }
 
-  if (authRoute && user) {
+  if (authRoute && user && isApproved) {
     const destination = request.nextUrl.clone();
     destination.pathname = "/dashboard";
     destination.search = "";
@@ -108,6 +130,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/dashboard/:path*", "/editor/:path*"],
+  matcher: ["/", "/dashboard/:path*", "/editor/:path*", "/responses/:path*"],
 };
-

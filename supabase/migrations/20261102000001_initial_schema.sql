@@ -177,9 +177,10 @@ ALTER TABLE public.form_responses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.form_answers ENABLE ROW LEVEL SECURITY;
 
 -- 6.1 Profiles Policies
-CREATE POLICY "Profiles are viewable by everyone"
+CREATE POLICY "Users can view their own profile"
     ON public.profiles FOR SELECT
-    USING (true);
+    TO authenticated
+    USING (auth.uid() = id);
 
 CREATE POLICY "Users can update their own profile"
     ON public.profiles FOR UPDATE

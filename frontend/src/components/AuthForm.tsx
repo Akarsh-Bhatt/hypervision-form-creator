@@ -19,15 +19,30 @@ export default function AuthForm({ mode: initialMode = "login" }: { mode?: Mode 
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [submittedApproval, setSubmittedApproval] = useState(false);
+  const [pendingApprovalNotice, setPendingApprovalNotice] = useState(false);
 
   useEffect(() => {
     setCurrentMode(initialMode);
   }, [initialMode]);
 
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const err = params.get("error");
+      if (err === "pending_approval") {
+        setPendingApprovalNotice(true);
+      } else if (err === "access_denied" || err === "unauthorized") {
+        setError("Access Restricted: Only approved accounts can access this workspace.");
+      }
+    }
+  }, []);
+
   function switchMode(newMode: Mode) {
     setCurrentMode(newMode);
     setError("");
     setMessage("");
+    setPendingApprovalNotice(false);
   }
 
   function getNextUrl(): string {
@@ -46,37 +61,59 @@ export default function AuthForm({ mode: initialMode = "login" }: { mode?: Mode 
     setLoading(true);
     setMessage("");
     setError("");
+    setPendingApprovalNotice(false);
 
     try {
       const supabase = createClient();
       const targetUrl = getNextUrl();
 
       if (currentMode === "login") {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data: authData, error: signInError } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
-        if (error) throw error;
+        if (signInError) throw signInError;
+
+        if (!authData.user) {
+          throw new Error("Unable to establish user session.");
+        }
+
+        const userEmail = (authData.user.email || "").toLowerCase();
+        const isDesignatedAdmin = userEmail === "akarsh.bhatt2007@gmail.com";
+        const isApproved =
+          isDesignatedAdmin ||
+          authData.user.app_metadata?.is_approved === true ||
+          authData.user.user_metadata?.is_approved === true;
+
+        if (!isApproved) {
+          // Double check profiles table as fallback
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("is_approved")
+            .eq("id", authData.user.id)
+            .maybeSingle();
+
+          if (!profile?.is_approved) {
+            await supabase.auth.signOut();
+            setPendingApprovalNotice(true);
+            setError("");
+            return;
+          }
+        }
+
         router.push(targetUrl);
         router.refresh();
       } else if (currentMode === "register") {
-        const { error, data } = await supabase.auth.signUp({
+        const { error: signUpError } = await supabase.auth.signUp({
           email,
           password,
           options: { data: { full_name: name } },
         });
-        if (error) throw error;
+        if (signUpError) throw signUpError;
 
-        setMessage(
-          data.session
-            ? "Your account is ready. Redirecting…"
-            : "Account created! Check your email if a confirmation was sent, or sign in."
-        );
-
-        if (data.session) {
-          router.push(targetUrl);
-          router.refresh();
-        }
+        // Disallow immediate session for unapproved registrations
+        await supabase.auth.signOut();
+        setSubmittedApproval(true);
       } else if (currentMode === "forgot") {
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: `${window.location.origin}/reset-password`,
@@ -182,7 +219,7 @@ export default function AuthForm({ mode: initialMode = "login" }: { mode?: Mode 
               </div>
 
               {/* Segmented Mode Switcher Tabs */}
-              {isAuthTab && (
+              {isAuthTab && !submittedApproval && (
                 <div className="grid grid-cols-2 p-1 bg-[#0b0f19]/90 border border-[#1f293d] rounded-lg mb-6">
                   <button
                     type="button"
@@ -204,12 +241,34 @@ export default function AuthForm({ mode: initialMode = "login" }: { mode?: Mode 
                         : "text-[#94a3b8] hover:text-white"
                     }`}
                   >
-                    Create Account
+                    Request Account
                   </button>
                 </div>
               )}
 
               {/* Status / Error Alerts */}
+              {pendingApprovalNotice && (
+                <div
+                  role="alert"
+                  className="mb-4 rounded-xl bg-amber-950/60 border border-amber-500/50 px-4 py-3 shadow-lg shadow-amber-950/40 flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 duration-200"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="material-symbols-outlined text-amber-400 text-lg shrink-0">hourglass_top</span>
+                    <span className="text-xs font-semibold text-amber-200">
+                      Admin approval pending.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPendingApprovalNotice(false)}
+                    className="text-amber-400/60 hover:text-amber-200 text-xs w-5 h-5 flex items-center justify-center rounded transition-colors cursor-pointer"
+                    title="Dismiss"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
               {error && (
                 <div
                   role="alert"
@@ -228,28 +287,64 @@ export default function AuthForm({ mode: initialMode = "login" }: { mode?: Mode 
                 </div>
               )}
 
-              {/* Auth Form */}
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Full Name (Sign Up Mode) */}
-                {currentMode === "register" && (
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-medium text-[#94a3b8]" htmlFor="input-fullname">
-                      Full Name
-                    </label>
-                    <div className="relative">
-                      <input
-                        id="input-fullname"
-                        type="text"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        placeholder="Sarah Connor"
-                        required
-                        className="w-full px-3.5 py-2.5 rounded-lg bg-[#0b0f19]/90 text-white text-sm placeholder-[#64748b] border border-[#334155] hover:border-slate-500 focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 transition-all duration-200 ease-in-out"
-                      />
-                      <User className="absolute right-3 top-2.5 text-[#64748b] pointer-events-none" size={18} />
-                    </div>
+              {submittedApproval ? (
+                <div className="py-6 px-4 text-center space-y-4">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center mx-auto shadow-lg shadow-amber-500/10">
+                    <span className="material-symbols-outlined text-2xl">hourglass_top</span>
                   </div>
-                )}
+                  <div className="space-y-1">
+                    <h3 className="text-base font-semibold text-white tracking-tight">
+                      Admin approval pending
+                    </h3>
+                    <p className="text-xs text-slate-400 max-w-xs mx-auto">
+                      Your account request has been submitted.
+                    </p>
+                  </div>
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSubmittedApproval(false);
+                        switchMode("login");
+                      }}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-sky-400 text-xs font-medium rounded-xl transition-all cursor-pointer shadow-sm"
+                    >
+                      Return to Sign In
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* Auth Form */}
+                  <form onSubmit={handleSubmit} className="space-y-4">
+                  {/* Admin Approval Notice for New Accounts */}
+                  {currentMode === "register" && (
+                    <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-300 text-xs flex items-center gap-2 mb-2">
+                      <span className="material-symbols-outlined text-[16px] text-amber-400 shrink-0">verified_user</span>
+                      <span>Admin approval required for new accounts.</span>
+                    </div>
+                  )}
+
+                  {/* Full Name (Sign Up Mode) */}
+                  {currentMode === "register" && (
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-medium text-[#94a3b8]" htmlFor="input-fullname">
+                        Full Name
+                      </label>
+                      <div className="relative">
+                        <input
+                          id="input-fullname"
+                          type="text"
+                          value={name}
+                          onChange={(e) => setName(e.target.value)}
+                          placeholder="Sarah Connor"
+                          required
+                          className="w-full px-3.5 py-2.5 rounded-lg bg-[#0b0f19]/90 text-white text-sm placeholder-[#64748b] border border-[#334155] hover:border-slate-500 focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 transition-all duration-200 ease-in-out"
+                        />
+                        <User className="absolute right-3 top-2.5 text-[#64748b] pointer-events-none" size={18} />
+                      </div>
+                    </div>
+                  )}
 
                 {/* Email */}
                 {currentMode !== "reset" && (
@@ -379,6 +474,8 @@ export default function AuthForm({ mode: initialMode = "login" }: { mode?: Mode 
                   </div>
                 </>
               )}
+            </>
+          )}
 
               {/* Forgot Mode Switchback */}
               {!isAuthTab && (

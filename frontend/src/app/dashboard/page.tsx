@@ -18,9 +18,21 @@ type Form = {
   updated_at: string;
 };
 
+type PendingUser = {
+  id: string;
+  email: string;
+  display_name: string | null;
+  created_at: string;
+};
+
 export default function DashboardPage() {
   const router = useRouter();
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userFullName, setUserFullName] = useState<string | null>(null);
+  const [pendingUsers, setPendingUsers] = useState<PendingUser[]>([]);
+  const [showApprovalsModal, setShowApprovalsModal] = useState(false);
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [forms, setForms] = useState<Form[]>([]);
   const [loading, setLoading] = useState(true);
   const [creatingForm, setCreatingForm] = useState(false);
@@ -72,12 +84,70 @@ export default function DashboardPage() {
           return;
         }
 
-        setUserEmail(session.user.email || null);
+        const user = session.user;
+        const email = (user.email || "").toLowerCase();
+        setUserEmail(user.email || null);
+
+        const isDesignatedAdmin = email === "akarsh.bhatt2007@gmail.com";
+
+        // Verify account approval status for non-admin users
+        if (!isDesignatedAdmin) {
+          const isApproved =
+            user.app_metadata?.is_approved === true ||
+            user.user_metadata?.is_approved === true;
+
+          if (!isApproved) {
+            try {
+              const { data: profile } = await supabase
+                .from("profiles")
+                .select("is_approved")
+                .eq("id", user.id)
+                .maybeSingle();
+
+              if (!profile?.is_approved) {
+                await supabase.auth.signOut();
+                router.push("/?error=pending_approval");
+                return;
+              }
+            } catch {
+              await supabase.auth.signOut();
+              router.push("/?error=pending_approval");
+              return;
+            }
+          }
+        }
+
+        // Retrieve real name
+        if (isDesignatedAdmin) {
+          setUserFullName("Akarsh");
+        } else {
+          const metaName =
+            user.user_metadata?.full_name ||
+            user.user_metadata?.name ||
+            user.user_metadata?.display_name ||
+            null;
+
+          if (metaName && typeof metaName === "string" && metaName.trim()) {
+            setUserFullName(metaName.trim());
+          }
+        }
+
+        // Designated admin loads pending account approval requests via secure endpoint
+        if (isDesignatedAdmin) {
+          try {
+            const res = await fetch("/api/admin/users");
+            if (res.ok) {
+              const json = await res.json();
+              setPendingUsers(json.pendingUsers || []);
+            }
+          } catch (e) {
+            console.error("Failed to fetch pending users:", e);
+          }
+        }
 
         const { data, error } = await supabase
           .from("forms")
           .select("*")
-          .eq("creator_id", session.user.id)
           .order("updated_at", { ascending: false });
 
         if (error) {
@@ -214,6 +284,53 @@ export default function DashboardPage() {
     setOpenMenuId(null);
   }
 
+  async function handleApproveUser(userId: string) {
+    if (approvingId) return;
+    setApprovingId(userId);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "approve", userId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to approve user.");
+
+      setPendingUsers((prev) => prev.filter((u) => u.id !== userId));
+    } catch (err: any) {
+      console.error("Approve user error:", err);
+      alert("Failed to approve user: " + (err?.message || "Unknown error"));
+    } finally {
+      setApprovingId(null);
+    }
+  }
+
+  async function handleRejectUser(userId: string) {
+    if (rejectingId) return;
+    const confirmed = window.confirm(
+      "Are you sure you want to reject and remove this account request?"
+    );
+    if (!confirmed) return;
+
+    setRejectingId(userId);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reject", userId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to reject user.");
+
+      setPendingUsers((prev) => prev.filter((u) => u.id !== userId));
+    } catch (err: any) {
+      console.error("Reject user error:", err);
+      alert("Failed to reject user: " + (err?.message || "Unknown error"));
+    } finally {
+      setRejectingId(null);
+    }
+  }
+
   async function handleSignOut() {
     setSigningOut(true);
     try {
@@ -268,7 +385,26 @@ export default function DashboardPage() {
     }
   }
 
-  const userName = userEmail ? userEmail.split("@")[0] : "Creator";
+  function formatFallbackName(email: string | null): string {
+    if (!email) return "Creator";
+    const localPart = email.split("@")[0] || "Creator";
+    return localPart
+      .replace(/[._-]+/g, " ")
+      .split(" ")
+      .filter(Boolean)
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ");
+  }
+
+  const userName = userFullName || formatFallbackName(userEmail);
+
+  function getUserInitials(name: string): string {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2 && parts[0] && parts[1]) {
+      return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+    }
+    return name.slice(0, 2).toUpperCase();
+  }
 
   return (
     <div className="bg-[#090e1a] text-slate-100 antialiased selection:bg-sky-500/20 selection:text-sky-300 relative min-h-screen flex flex-col font-sans">
@@ -308,13 +444,34 @@ export default function DashboardPage() {
             </div>
 
             <div className="flex items-center gap-3">
-              {userEmail && (
-                <div className="flex items-center gap-2.5 pl-2 border-l border-slate-800">
-                  <div className="w-7 h-7 rounded-full bg-sky-500/20 border border-sky-400/40 flex items-center justify-center text-sky-300 text-xs font-bold uppercase font-mono">
-                    {userName.slice(0, 2)}
+              {/* Admin Approvals Button (Visible only to designated admin Akarsh) */}
+              {(userEmail || "").toLowerCase() === "akarsh.bhatt2007@gmail.com" && (
+                <button
+                  type="button"
+                  onClick={() => setShowApprovalsModal(true)}
+                  className="relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-800 bg-[#0f172a]/80 hover:bg-slate-800 text-slate-300 hover:text-white text-xs font-medium transition-all cursor-pointer shadow-sm"
+                  title="Manage Account Approvals"
+                >
+                  <span className="material-symbols-outlined text-[17px] text-amber-400">admin_panel_settings</span>
+                  <span className="hidden sm:inline">Admin Approvals</span>
+                  {pendingUsers.length > 0 && (
+                    <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[10px] font-bold animate-pulse">
+                      {pendingUsers.length}
+                    </span>
+                  )}
+                </button>
+              )}
+
+              {userName && (
+                <div
+                  className="flex items-center gap-2.5 pl-2 border-l border-slate-800"
+                  title={userEmail ? `${userName} (${userEmail})` : userName}
+                >
+                  <div className="w-7 h-7 rounded-full bg-sky-500/20 border border-sky-400/40 flex items-center justify-center text-sky-300 text-xs font-bold font-mono">
+                    {getUserInitials(userName)}
                   </div>
-                  <span className="hidden lg:inline text-xs font-medium text-slate-300 font-mono">
-                    {userEmail}
+                  <span className="hidden lg:inline text-xs font-semibold text-slate-200">
+                    {userName}
                   </span>
                 </div>
               )}
@@ -336,7 +493,7 @@ export default function DashboardPage() {
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800/80 pb-6 pt-2">
               <div className="flex flex-col gap-1">
                 <h1 className="text-2xl lg:text-3xl text-slate-50 tracking-tight font-bold">
-                  Welcome back, <span className="capitalize text-sky-400">{userName}</span>
+                  Welcome back, <span className="text-sky-400">{userName}</span>
                 </h1>
                 <p className="text-xs text-slate-400">
                   Innovate. Collaborate. Elevate. Intelligent data collection designed for high-velocity engineering teams.
@@ -821,6 +978,99 @@ export default function DashboardPage() {
               • © 2026 HYPERVISION. ALL RIGHT RESERVED.
             </p>
           </footer>
+
+          {/* Admin Approvals Modal */}
+          {showApprovalsModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-150">
+              <div className="bg-[#0b101b] border border-slate-800 rounded-2xl max-w-xl w-full p-6 shadow-2xl shadow-black relative overflow-hidden">
+                <div className="flex items-center justify-between pb-4 border-b border-slate-800/80 mb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center">
+                      <span className="material-symbols-outlined text-[20px]">admin_panel_settings</span>
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-white tracking-tight">
+                        Account Access Approvals
+                      </h2>
+                      <p className="text-xs text-slate-400">
+                        Only administrator-approved accounts are allowed to open the site.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowApprovalsModal(false)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">close</span>
+                  </button>
+                </div>
+
+                {pendingUsers.length === 0 ? (
+                  <div className="text-center py-10 px-4 bg-[#080d17]/50 rounded-xl border border-slate-800/50">
+                    <span className="material-symbols-outlined text-3xl text-emerald-400 mb-2">verified</span>
+                    <h3 className="text-sm font-semibold text-white">No Pending Requests</h3>
+                    <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
+                      All user registrations have been verified. Any newly requested accounts will appear here for your approval.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                    {pendingUsers.map((pending) => (
+                      <div
+                        key={pending.id}
+                        className="p-3.5 rounded-xl bg-[#0e1626] border border-slate-800 flex items-center justify-between gap-3"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-white truncate">
+                              {pending.display_name || "New Applicant"}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                              Pending
+                            </span>
+                          </div>
+                          <p className="text-xs font-mono text-slate-400 truncate mt-0.5">
+                            {pending.email}
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            disabled={approvingId === pending.id || rejectingId === pending.id}
+                            onClick={() => handleApproveUser(pending.id)}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
+                          >
+                            {approvingId === pending.id ? "Approving..." : "Approve as Admin"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={approvingId === pending.id || rejectingId === pending.id}
+                            onClick={() => handleRejectUser(pending.id)}
+                            className="px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-rose-950/60 hover:border-rose-800 hover:text-rose-300 text-slate-400 text-xs font-medium transition-all cursor-pointer disabled:opacity-50"
+                            title="Reject Request"
+                          >
+                            {rejectingId === pending.id ? "Rejecting..." : "Reject"}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="mt-5 pt-3 border-t border-slate-800/80 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowApprovalsModal(false)}
+                    className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300 cursor-pointer transition-colors"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
