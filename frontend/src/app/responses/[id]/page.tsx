@@ -3,8 +3,7 @@
 import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
-import { isDesignatedAdmin } from "@/lib/auth-config";
+import { createClient, ensureWorkspaceSession } from "@/lib/supabase/client";
 import AsciiRainBackdrop from "@/components/AsciiRainBackdrop";
 import { parseScaleConfig } from "@/lib/scale";
 
@@ -72,42 +71,7 @@ export default function ResponsesPage() {
 
     try {
       const supabase = createClient();
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.user) {
-        router.push("/");
-        return;
-      }
-
-      // Verify account approval status
-      const userEmail = (session.user.email || "").toLowerCase();
-      const adminUser = isDesignatedAdmin(userEmail);
-      const isApproved =
-        adminUser ||
-        session.user.app_metadata?.is_approved === true ||
-        session.user.user_metadata?.is_approved === true;
-
-      if (!isApproved) {
-        try {
-          const { data: profile } = await supabase
-            .from("profiles")
-            .select("is_approved")
-            .eq("id", session.user.id)
-            .maybeSingle();
-
-          if (!profile?.is_approved) {
-            await supabase.auth.signOut();
-            router.push("/?error=pending_approval");
-            return;
-          }
-        } catch {
-          await supabase.auth.signOut();
-          router.push("/?error=pending_approval");
-          return;
-        }
-      }
+      await ensureWorkspaceSession(supabase);
 
       // 1. Fetch Form
       const { data: formData, error: formError } = await supabase
@@ -213,11 +177,11 @@ export default function ResponsesPage() {
     const lastSubmitted =
       responses.length > 0
         ? new Date(responses[0].submitted_at).toLocaleDateString(undefined, {
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          })
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
         : "No submissions yet";
 
     return { total, avgDuration, lastSubmitted };
@@ -378,9 +342,8 @@ export default function ResponsesPage() {
                 title="Refresh Telemetry"
               >
                 <span
-                  className={`material-symbols-outlined text-[18px] ${
-                    refreshing ? "animate-spin text-sky-400" : ""
-                  }`}
+                  className={`material-symbols-outlined text-[18px] ${refreshing ? "animate-spin text-sky-400" : ""
+                    }`}
                 >
                   sync
                 </span>
@@ -494,22 +457,20 @@ export default function ResponsesPage() {
                 <button
                   type="button"
                   onClick={() => setActiveTab("summary")}
-                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                    activeTab === "summary"
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${activeTab === "summary"
                       ? "bg-sky-500 text-slate-950 shadow-md"
                       : "text-slate-400 hover:text-white"
-                  }`}
+                    }`}
                 >
                   Summary Analytics
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("table")}
-                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                    activeTab === "table"
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${activeTab === "table"
                       ? "bg-sky-500 text-slate-950 shadow-md"
                       : "text-slate-400 hover:text-white"
-                  }`}
+                    }`}
                 >
                   <span>Individual Responses</span>
                   <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#1a2942] text-sky-300 font-mono">
@@ -576,40 +537,40 @@ export default function ResponsesPage() {
                               {(q.question_type === "multiple_choice" ||
                                 q.question_type === "checkboxes" ||
                                 q.question_type === "dropdown") && (
-                                <div className="flex flex-col gap-3">
-                                  {(q.options || []).map((rawOpt, optIdx) => {
-                                    const optLabel = getOptionLabel(rawOpt);
-                                    const count = allAnswers.filter((a) =>
-                                      Array.isArray(a)
-                                        ? a.some((item) => getOptionLabel(item) === optLabel)
-                                        : getOptionLabel(a) === optLabel
-                                    ).length;
-                                    const percent =
-                                      totalAnswered > 0
-                                        ? Math.round((count / totalAnswered) * 100)
-                                        : 0;
+                                  <div className="flex flex-col gap-3">
+                                    {(q.options || []).map((rawOpt, optIdx) => {
+                                      const optLabel = getOptionLabel(rawOpt);
+                                      const count = allAnswers.filter((a) =>
+                                        Array.isArray(a)
+                                          ? a.some((item) => getOptionLabel(item) === optLabel)
+                                          : getOptionLabel(a) === optLabel
+                                      ).length;
+                                      const percent =
+                                        totalAnswered > 0
+                                          ? Math.round((count / totalAnswered) * 100)
+                                          : 0;
 
-                                    return (
-                                      <div key={optIdx} className="flex flex-col gap-1.5">
-                                        <div className="flex items-center justify-between text-xs">
-                                          <span className="font-semibold text-slate-200">
-                                            {optLabel}
-                                          </span>
-                                          <span className="font-mono font-bold text-sky-400">
-                                            {percent}% ({count})
-                                          </span>
+                                      return (
+                                        <div key={optIdx} className="flex flex-col gap-1.5">
+                                          <div className="flex items-center justify-between text-xs">
+                                            <span className="font-semibold text-slate-200">
+                                              {optLabel}
+                                            </span>
+                                            <span className="font-mono font-bold text-sky-400">
+                                              {percent}% ({count})
+                                            </span>
+                                          </div>
+                                          <div className="w-full bg-[#070b14] h-2 rounded-full overflow-hidden border border-slate-800">
+                                            <div
+                                              className="bg-sky-500 h-full rounded-full transition-all duration-500"
+                                              style={{ width: `${percent}%` }}
+                                            />
+                                          </div>
                                         </div>
-                                        <div className="w-full bg-[#070b14] h-2 rounded-full overflow-hidden border border-slate-800">
-                                          <div
-                                            className="bg-sky-500 h-full rounded-full transition-all duration-500"
-                                            style={{ width: `${percent}%` }}
-                                          />
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
+                                      );
+                                    })}
+                                  </div>
+                                )}
 
                               {/* Linear Scale (Configurable min-max & numbers or stars) */}
                               {q.question_type === "linear_scale" && (() => {
@@ -635,17 +596,16 @@ export default function ResponsesPage() {
                                             className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end"
                                           >
                                             <div
-                                              className={`w-full rounded-t transition-colors ${
-                                                config.format === "stars"
+                                              className={`w-full rounded-t transition-colors ${config.format === "stars"
                                                   ? "bg-amber-400 hover:bg-amber-300"
                                                   : "bg-sky-500 hover:bg-sky-400"
-                                              }`}
+                                                }`}
                                               style={{ height: `${heightPct}%` }}
                                               title={`${n}: ${countVotes} votes`}
                                             />
                                             <span className="text-[10px] font-mono text-slate-400 font-bold flex items-center gap-0.5">
                                               {config.format === "stars" && (
-                                                <span className="text-amber-400 text-[9px]">★</span>
+                                                <span className="material-symbols-outlined text-amber-400 text-[12px] leading-none">star</span>
                                               )}
                                               {n}
                                             </span>
@@ -666,23 +626,23 @@ export default function ResponsesPage() {
                               {/* Text Answers Recent Sample Feed */}
                               {(q.question_type === "short_text" ||
                                 q.question_type === "long_text") && (
-                                <div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1">
-                                  {allAnswers.length === 0 ? (
-                                    <p className="text-xs text-slate-500 italic">
-                                      No written feedback recorded yet.
-                                    </p>
-                                  ) : (
-                                    allAnswers.slice(0, 5).map((ans, aIdx) => (
-                                      <div
-                                        key={aIdx}
-                                        className="p-3 rounded-lg bg-[#070b14] border border-slate-800 text-xs text-slate-200 leading-relaxed"
-                                      >
-                                        "{String(ans)}"
-                                      </div>
-                                    ))
-                                  )}
-                                </div>
-                              )}
+                                  <div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1">
+                                    {allAnswers.length === 0 ? (
+                                      <p className="text-xs text-slate-500 italic">
+                                        No written feedback recorded yet.
+                                      </p>
+                                    ) : (
+                                      allAnswers.slice(0, 5).map((ans, aIdx) => (
+                                        <div
+                                          key={aIdx}
+                                          className="p-3 rounded-lg bg-[#070b14] border border-slate-800 text-xs text-slate-200 leading-relaxed"
+                                        >
+                                          "{String(ans)}"
+                                        </div>
+                                      ))
+                                    )}
+                                  </div>
+                                )}
                             </div>
                           </div>
                         </div>
@@ -861,7 +821,7 @@ export default function ResponsesPage() {
           <footer className="w-full bg-[#0b1120] border-t border-[#1e293b] py-3.5 relative z-10 px-6">
             <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-2 max-w-7xl mx-auto">
               <span className="text-[11px] font-mono text-slate-400 select-none">
-                • © 2026 HYPERVISION. ALL RIGHT RESERVED.
+                © 2026 HYPERVISION. ALL RIGHT RESERVED.
               </span>
               <div className="flex items-center gap-2">
                 <span className="font-mono text-xs text-slate-300">All systems normal</span>

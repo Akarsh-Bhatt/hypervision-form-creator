@@ -265,7 +265,7 @@ export default function AuthForm({ mode: initialMode = "login" }: { mode?: Mode 
                     className="text-amber-400/60 hover:text-amber-200 text-xs w-5 h-5 flex items-center justify-center rounded transition-colors cursor-pointer"
                     title="Dismiss"
                   >
-                    ✕
+                    <span className="material-symbols-outlined text-sm">close</span>
                   </button>
                 </div>
               )}
@@ -516,7 +516,6 @@ export default function AuthForm({ mode: initialMode = "login" }: { mode?: Mode 
       {/* Static / Bottom-Pinned Global Footer */}
       <footer className="fixed bottom-0 left-0 right-0 z-20 w-full py-3 sm:py-3.5 px-6 sm:px-12 flex items-center justify-between text-xs text-slate-500 font-mono border-t border-[#1f293d]/60 bg-[#090e1a]/85 backdrop-blur-md">
         <div className="flex items-center gap-3">
-          <span className="text-slate-700">•</span>
           <span className="text-[11px] text-slate-500 uppercase tracking-wider hidden sm:inline">
             Hypervision Forms Portal
           </span>

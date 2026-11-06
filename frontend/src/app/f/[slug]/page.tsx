@@ -83,22 +83,20 @@ function FormCustomDropdown({
       <button
         type="button"
         onClick={() => setIsOpen((prev) => !prev)}
-        className={`w-full bg-[#060e1d] border rounded-xl px-4 py-3.5 text-sm flex items-center justify-between transition-all cursor-pointer select-none text-left ${
-          hasError
+        className={`w-full bg-[#060e1d] border rounded-xl px-4 py-3.5 text-sm flex items-center justify-between transition-all cursor-pointer select-none text-left ${hasError
             ? "!border-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.15)]"
             : isOpen
               ? "border-cyan-400 shadow-[0_0_20px_rgba(0,240,255,0.2)] bg-[#071326]"
               : "border-[#162f52] hover:border-cyan-500/50 hover:bg-[#071122]"
-        }`}
+          }`}
       >
         <span className={value ? "text-slate-100 font-medium truncate" : "text-slate-500 italic truncate"}>
           {value || placeholder}
         </span>
         <ChevronDown
           size={18}
-          className={`text-cyan-400 shrink-0 ml-2 transition-transform duration-200 ${
-            isOpen ? "rotate-180 text-cyan-300" : ""
-          }`}
+          className={`text-cyan-400 shrink-0 ml-2 transition-transform duration-200 ${isOpen ? "rotate-180 text-cyan-300" : ""
+            }`}
         />
       </button>
 
@@ -117,11 +115,10 @@ function FormCustomDropdown({
                     onChange(opt);
                     setIsOpen(false);
                   }}
-                  className={`w-full px-3.5 py-2.5 rounded-lg text-xs font-semibold flex items-center justify-between transition-all text-left cursor-pointer ${
-                    isSelected
+                  className={`w-full px-3.5 py-2.5 rounded-lg text-xs font-semibold flex items-center justify-between transition-all text-left cursor-pointer ${isSelected
                       ? "bg-cyan-950/60 text-cyan-300 border-l-2 border-cyan-400"
                       : "text-slate-300 hover:text-white hover:bg-cyan-950/30"
-                  }`}
+                    }`}
                 >
                   <span className="truncate">{opt}</span>
                   {isSelected && <Check size={14} className="text-cyan-400 shrink-0" />}
@@ -345,16 +342,33 @@ export default function PublicFormPage() {
           answer_value: answers[q.id],
         }));
 
-      // 3. Submit atomically via secure RPC (SEC-02, SEC-03, SEC-10)
-      const { data: rpcResult, error: rpcError } = await supabase.rpc(
-        "submit_form_response",
-        {
-          p_form_id: form.id,
-          p_respondent_email: trimmedEmail.toLowerCase(),
-          p_completion_seconds: completionSeconds,
-          p_answers: answerPayloads,
+      // 3. Submit atomically via secure RPC (SECURITY DEFINER)
+      let rpcResult: any = null;
+      let rpcError: any = null;
+
+      const rpcPayload = {
+        p_form_id: form.id,
+        p_respondent_email: trimmedEmail.toLowerCase(),
+        p_completion_seconds: completionSeconds,
+        p_answers: answerPayloads,
+      };
+
+      // Try submit_form_response first (which is existing on all deployed Supabase databases)
+      let primaryRpc = await supabase.rpc("submit_form_response", rpcPayload);
+      if (primaryRpc.error) {
+        // If submit_form_response failed, try submit_form_response_secure
+        const secureRpc = await supabase.rpc("submit_form_response_secure", rpcPayload);
+        if (!secureRpc.error) {
+          rpcResult = secureRpc.data;
+          rpcError = null;
+        } else {
+          rpcResult = primaryRpc.data;
+          rpcError = primaryRpc.error;
         }
-      );
+      } else {
+        rpcResult = primaryRpc.data;
+        rpcError = null;
+      }
 
       if (rpcError) {
         const errorMsg = rpcError.message || "";
@@ -377,6 +391,7 @@ export default function PublicFormPage() {
           id: responseId,
           form_id: form.id,
           sap_id: trimmedEmail.toLowerCase(),
+          respondent_ip: trimmedEmail.toLowerCase(),
           completion_time_seconds: completionSeconds,
         };
 
@@ -384,19 +399,17 @@ export default function PublicFormPage() {
           .from("form_responses")
           .insert(insertPayload);
 
-        // If sap_id column doesn't exist on legacy schemas, retry with respondent_ip
-        if (
-          respError &&
-          (respError.message?.includes("sap_id") || respError.details?.includes("sap_id"))
-        ) {
-          insertPayload = {
-            id: responseId,
-            form_id: form.id,
-            respondent_ip: trimmedEmail.toLowerCase(),
-            completion_time_seconds: completionSeconds,
-          };
-          const retry = await supabase.from("form_responses").insert(insertPayload);
-          respError = retry.error;
+        // If one of the tracking columns does not exist on this schema, retry with only the existing column
+        if (respError && respError.message?.includes("does not exist")) {
+          if (respError.message.includes("respondent_ip")) {
+            delete insertPayload.respondent_ip;
+            const retry = await supabase.from("form_responses").insert(insertPayload);
+            respError = retry.error;
+          } else if (respError.message.includes("sap_id")) {
+            delete insertPayload.sap_id;
+            const retry = await supabase.from("form_responses").insert(insertPayload);
+            respError = retry.error;
+          }
         }
 
         if (respError) {
@@ -603,11 +616,10 @@ export default function PublicFormPage() {
         {/* Google Forms-style Required Email Authentication Card */}
         <div
           id="respondent-email-card"
-          className={`rounded-2xl border transition-all duration-200 bg-[#0a1628]/95 backdrop-blur-md p-6 sm:p-7 shadow-sm space-y-3.5 ${
-            emailError
+          className={`rounded-2xl border transition-all duration-200 bg-[#0a1628]/95 backdrop-blur-md p-6 sm:p-7 shadow-sm space-y-3.5 ${emailError
               ? "border-rose-500/80 ring-2 ring-rose-500/20"
               : "border-[#162f52] hover:border-cyan-500/30"
-          }`}
+            }`}
         >
           <div className="flex items-start justify-between gap-3">
             <div className="space-y-1">
@@ -697,11 +709,10 @@ export default function PublicFormPage() {
               <div
                 key={q.id}
                 id={`q-${q.id}`}
-                className={`rounded-2xl border transition-all duration-200 bg-[#0a1628]/95 p-6 sm:p-7 shadow-sm space-y-3 ${
-                  hasError
+                className={`rounded-2xl border transition-all duration-200 bg-[#0a1628]/95 p-6 sm:p-7 shadow-sm space-y-3 ${hasError
                     ? "border-rose-500/80 ring-2 ring-rose-500/20"
                     : "border-[#162f52] hover:border-cyan-500/40"
-                }`}
+                  }`}
               >
                 <div className="space-y-1">
                   <label className="block text-xs font-mono font-bold uppercase tracking-wider text-cyan-400">
@@ -754,18 +765,16 @@ export default function PublicFormPage() {
                             key={optIdx}
                             type="button"
                             onClick={() => handleAnswerChange(q.id, opt)}
-                            className={`flex items-center gap-3 p-3.5 rounded-xl border text-left cursor-pointer transition select-none ${
-                              isSelected
+                            className={`flex items-center gap-3 p-3.5 rounded-xl border text-left cursor-pointer transition select-none ${isSelected
                                 ? "border-cyan-400 bg-cyan-950/40 text-cyan-200 ring-1 ring-cyan-400/30 font-medium"
                                 : "border-[#162f52] bg-[#060e1d] hover:border-cyan-500/40 hover:bg-[#0c1e36] text-slate-300"
-                            }`}
+                              }`}
                           >
                             <div
-                              className={`h-4 w-4 rounded-full border flex items-center justify-center transition ${
-                                isSelected
+                              className={`h-4 w-4 rounded-full border flex items-center justify-center transition ${isSelected
                                   ? "border-cyan-400 bg-cyan-400"
                                   : "border-slate-600 bg-[#060e1d]"
-                              }`}
+                                }`}
                             >
                               {isSelected && (
                                 <div className="h-1.5 w-1.5 rounded-full bg-slate-950" />
@@ -790,18 +799,16 @@ export default function PublicFormPage() {
                             key={optIdx}
                             type="button"
                             onClick={() => handleCheckboxToggle(q.id, opt)}
-                            className={`flex items-center gap-3 p-3.5 rounded-xl border text-left cursor-pointer transition select-none ${
-                              isChecked
+                            className={`flex items-center gap-3 p-3.5 rounded-xl border text-left cursor-pointer transition select-none ${isChecked
                                 ? "border-cyan-400 bg-cyan-950/40 text-cyan-200 ring-1 ring-cyan-400/30 font-medium"
                                 : "border-[#162f52] bg-[#060e1d] hover:border-cyan-500/40 hover:bg-[#0c1e36] text-slate-300"
-                            }`}
+                              }`}
                           >
                             <div
-                              className={`h-4 w-4 rounded border flex items-center justify-center transition ${
-                                isChecked
+                              className={`h-4 w-4 rounded border flex items-center justify-center transition ${isChecked
                                   ? "border-cyan-400 bg-cyan-400 text-slate-950"
                                   : "border-slate-600 bg-[#060e1d]"
-                              }`}
+                                }`}
                             >
                               {isChecked && <Check size={12} strokeWidth={3} />}
                             </div>
@@ -840,11 +847,10 @@ export default function PublicFormPage() {
                                   key={num}
                                   type="button"
                                   onClick={() => handleAnswerChange(q.id, num)}
-                                  className={`flex items-center justify-center p-3 rounded-xl border transition cursor-pointer ${
-                                    isFilled
+                                  className={`flex items-center justify-center p-3 rounded-xl border transition cursor-pointer ${isFilled
                                       ? "border-amber-400 bg-amber-950/40 text-amber-300 shadow-[0_0_15px_rgba(251,191,36,0.25)]"
                                       : "border-[#162f52] bg-[#060e1d] hover:border-amber-500/40 text-slate-400 hover:text-slate-200"
-                                  }`}
+                                    }`}
                                   title={`Rating: ${num}`}
                                   aria-label={`${num} star`}
                                 >
@@ -869,11 +875,10 @@ export default function PublicFormPage() {
                                   key={num}
                                   type="button"
                                   onClick={() => handleAnswerChange(q.id, num)}
-                                  className={`min-w-[44px] h-11 px-3.5 rounded-xl border font-bold text-sm transition cursor-pointer ${
-                                    isSelected
+                                  className={`min-w-[44px] h-11 px-3.5 rounded-xl border font-bold text-sm transition cursor-pointer ${isSelected
                                       ? "border-cyan-400 bg-cyan-950/50 text-cyan-300 shadow-[0_0_15px_rgba(0,240,255,0.25)]"
                                       : "border-[#162f52] bg-[#060e1d] hover:border-cyan-500/40 text-slate-300 hover:text-white"
-                                  }`}
+                                    }`}
                                 >
                                   {num}
                                 </button>
@@ -934,7 +939,7 @@ export default function PublicFormPage() {
 
         {/* Footer Brand */}
         <footer className="pt-6 pb-4 text-center text-xs font-mono text-slate-500 select-none">
-          • © 2026 HYPERVISION. ALL RIGHT RESERVED.
+          © 2026 HYPERVISION. ALL RIGHT RESERVED.
         </footer>
       </form>
     </div>

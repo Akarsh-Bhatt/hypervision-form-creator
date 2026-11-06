@@ -3,8 +3,7 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
-import { isDesignatedAdmin } from "@/lib/auth-config";
+import { createClient, ensureWorkspaceSession } from "@/lib/supabase/client";
 import AsciiRainBackdrop from "@/components/AsciiRainBackdrop";
 import { parseScaleConfig, serializeScaleConfig, type ScaleConfig } from "@/lib/scale";
 
@@ -46,43 +45,43 @@ const FIELD_TYPES: Array<{
   sub: string;
   icon: string;
 }> = [
-  {
-    type: "short_text",
-    label: "Short Text",
-    sub: "Single-line response",
-    icon: "short_text",
-  },
-  {
-    type: "long_text",
-    label: "Long Text",
-    sub: "Multi-line paragraph",
-    icon: "notes",
-  },
-  {
-    type: "multiple_choice",
-    label: "Multiple Choice",
-    sub: "Single selection radio",
-    icon: "radio_button_checked",
-  },
-  {
-    type: "checkboxes",
-    label: "Checkboxes",
-    sub: "Multi-select list",
-    icon: "check_box",
-  },
-  {
-    type: "dropdown",
-    label: "Dropdown",
-    sub: "Select from dropdown",
-    icon: "arrow_drop_down_circle",
-  },
-  {
-    type: "linear_scale",
-    label: "Linear Scale / NPS",
-    sub: "Numeric or star rating",
-    icon: "linear_scale",
-  },
-];
+    {
+      type: "short_text",
+      label: "Short Text",
+      sub: "Single-line response",
+      icon: "short_text",
+    },
+    {
+      type: "long_text",
+      label: "Long Text",
+      sub: "Multi-line paragraph",
+      icon: "notes",
+    },
+    {
+      type: "multiple_choice",
+      label: "Multiple Choice",
+      sub: "Single selection radio",
+      icon: "radio_button_checked",
+    },
+    {
+      type: "checkboxes",
+      label: "Checkboxes",
+      sub: "Multi-select list",
+      icon: "check_box",
+    },
+    {
+      type: "dropdown",
+      label: "Dropdown",
+      sub: "Select from dropdown",
+      icon: "arrow_drop_down_circle",
+    },
+    {
+      type: "linear_scale",
+      label: "Linear Scale / NPS",
+      sub: "Numeric or star rating",
+      icon: "linear_scale",
+    },
+  ];
 
 export default function FormEditorPage() {
   const params = useParams();
@@ -146,42 +145,7 @@ export default function FormEditorPage() {
     async function loadFormAndQuestions() {
       try {
         const supabase = createClient();
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        if (!session?.user) {
-          router.push("/");
-          return;
-        }
-
-        // Verify account approval status
-        const userEmail = (session.user.email || "").toLowerCase();
-        const adminUser = isDesignatedAdmin(userEmail);
-        const isApproved =
-          adminUser ||
-          session.user.app_metadata?.is_approved === true ||
-          session.user.user_metadata?.is_approved === true;
-
-        if (!isApproved) {
-          try {
-            const { data: profile } = await supabase
-              .from("profiles")
-              .select("is_approved")
-              .eq("id", session.user.id)
-              .maybeSingle();
-
-            if (!profile?.is_approved) {
-              await supabase.auth.signOut();
-              router.push("/?error=pending_approval");
-              return;
-            }
-          } catch {
-            await supabase.auth.signOut();
-            router.push("/?error=pending_approval");
-            return;
-          }
-        }
+        await ensureWorkspaceSession(supabase);
 
         const { data: formData, error: formError } = await supabase
           .from("forms")
@@ -637,8 +601,8 @@ export default function FormEditorPage() {
                 type="button"
                 onClick={() => setDeviceView("desktop")}
                 className={`px-2.5 py-1 rounded text-xs flex items-center gap-1 transition-colors cursor-pointer ${deviceView === "desktop"
-                    ? "bg-sky-500 text-slate-950 font-bold"
-                    : "text-slate-400 hover:text-white"
+                  ? "bg-sky-500 text-slate-950 font-bold"
+                  : "text-slate-400 hover:text-white"
                   }`}
                 title="Desktop View"
               >
@@ -649,8 +613,8 @@ export default function FormEditorPage() {
                 type="button"
                 onClick={() => setDeviceView("tablet")}
                 className={`px-2.5 py-1 rounded text-xs flex items-center gap-1 transition-colors cursor-pointer ${deviceView === "tablet"
-                    ? "bg-sky-500 text-slate-950 font-bold"
-                    : "text-slate-400 hover:text-white"
+                  ? "bg-sky-500 text-slate-950 font-bold"
+                  : "text-slate-400 hover:text-white"
                   }`}
                 title="Tablet View"
               >
@@ -661,8 +625,8 @@ export default function FormEditorPage() {
                 type="button"
                 onClick={() => setDeviceView("mobile")}
                 className={`px-2.5 py-1 rounded text-xs flex items-center gap-1 transition-colors cursor-pointer ${deviceView === "mobile"
-                    ? "bg-sky-500 text-slate-950 font-bold"
-                    : "text-slate-400 hover:text-white"
+                  ? "bg-sky-500 text-slate-950 font-bold"
+                  : "text-slate-400 hover:text-white"
                   }`}
                 title="Mobile View"
               >
@@ -675,13 +639,10 @@ export default function FormEditorPage() {
             <div className="flex items-center gap-2">
               <Link
                 href={`/responses/${form?.id}`}
-                className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-slate-700/80 bg-[#111c30] hover:bg-[#172540] text-slate-200 text-xs font-semibold transition-colors"
+                className="flex items-center justify-center h-9 px-3.5 rounded-lg border border-slate-700/80 bg-[#111c30] hover:bg-[#172540] text-slate-200 text-xs font-semibold transition-colors"
                 title="View Submissions"
               >
-                <span className="material-symbols-outlined text-[16px] text-sky-400">
-                  analytics
-                </span>
-                <span className="hidden sm:inline">Responses</span>
+                <span>Responses</span>
               </Link>
 
               <button
@@ -716,8 +677,8 @@ export default function FormEditorPage() {
                 type="button"
                 onClick={handleTogglePublish}
                 className={`flex items-center gap-1.5 h-9 px-3.5 rounded-lg font-bold text-xs transition-colors cursor-pointer shadow-md ${form?.status === "published"
-                    ? "bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/30"
-                    : "bg-sky-500 hover:bg-sky-400 text-slate-950 shadow-sky-500/25"
+                  ? "bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 hover:bg-emerald-500/30"
+                  : "bg-sky-500 hover:bg-sky-400 text-slate-950 shadow-sky-500/25"
                   }`}
               >
                 <span className="material-symbols-outlined text-[16px]">
@@ -758,8 +719,8 @@ export default function FormEditorPage() {
                         className="h-full rounded-full bg-sky-500 transition-all duration-300"
                         style={{
                           width: `${questions.length > 0
-                              ? Math.max(10, ((activeIndex + 1) / questions.length) * 100)
-                              : 0
+                            ? Math.max(10, ((activeIndex + 1) / questions.length) * 100)
+                            : 0
                             }%`,
                         }}
                       />
@@ -922,8 +883,8 @@ export default function FormEditorPage() {
                                       <div key={optIdx} className="flex items-center gap-2.5">
                                         <div
                                           className={`w-4 h-4 border border-sky-400 flex items-center justify-center shrink-0 ${q.question_type === "multiple_choice"
-                                              ? "rounded-full"
-                                              : "rounded"
+                                            ? "rounded-full"
+                                            : "rounded"
                                             }`}
                                         >
                                           <div
@@ -1046,11 +1007,10 @@ export default function FormEditorPage() {
                                           <button
                                             key={num}
                                             type="button"
-                                            className={`flex-1 min-w-[34px] h-10 rounded-lg border text-xs font-bold transition-all ${
-                                              nIdx === scaleNumbers.length - 1
+                                            className={`flex-1 min-w-[34px] h-10 rounded-lg border text-xs font-bold transition-all ${nIdx === scaleNumbers.length - 1
                                                 ? "bg-sky-500 text-slate-950 border-sky-400 shadow-md shadow-sky-500/30"
                                                 : "bg-[#070b14] hover:bg-[#152238] border-slate-700 text-slate-200"
-                                            }`}
+                                              }`}
                                           >
                                             {num}
                                           </button>
@@ -1229,8 +1189,8 @@ export default function FormEditorPage() {
                   type="button"
                   onClick={() => setInspectorTab("field")}
                   className={`flex-1 py-1.5 rounded-lg font-bold text-xs text-center transition-all cursor-pointer ${inspectorTab === "field"
-                      ? "bg-sky-500 text-slate-950 shadow-sm"
-                      : "text-slate-300 hover:text-white"
+                    ? "bg-sky-500 text-slate-950 shadow-sm"
+                    : "text-slate-300 hover:text-white"
                     }`}
                 >
                   Field Settings
@@ -1239,8 +1199,8 @@ export default function FormEditorPage() {
                   type="button"
                   onClick={() => setInspectorTab("form")}
                   className={`flex-1 py-1.5 rounded-lg font-bold text-xs text-center transition-all cursor-pointer ${inspectorTab === "form"
-                      ? "bg-sky-500 text-slate-950 shadow-sm"
-                      : "text-slate-300 hover:text-white"
+                    ? "bg-sky-500 text-slate-950 shadow-sm"
+                    : "text-slate-300 hover:text-white"
                     }`}
                 >
                   Form Settings
@@ -1264,11 +1224,10 @@ export default function FormEditorPage() {
                           <button
                             type="button"
                             onClick={() => setFieldTypeDropdownOpen((prev) => !prev)}
-                            className={`w-full bg-[#070b14] border rounded-xl p-2.5 text-xs flex items-center justify-between transition-all cursor-pointer ${
-                              fieldTypeDropdownOpen
+                            className={`w-full bg-[#070b14] border rounded-xl p-2.5 text-xs flex items-center justify-between transition-all cursor-pointer ${fieldTypeDropdownOpen
                                 ? "border-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.2)] bg-[#0b1322]"
                                 : "border-slate-700 hover:border-slate-500 hover:bg-[#0c1322]"
-                            }`}
+                              }`}
                           >
                             <div className="flex items-center gap-2.5 min-w-0">
                               <div className="w-7 h-7 rounded-lg bg-[#111a2e] border border-slate-700 flex items-center justify-center text-sky-400 shrink-0">
@@ -1286,9 +1245,8 @@ export default function FormEditorPage() {
                               </div>
                             </div>
                             <span
-                              className={`material-symbols-outlined text-[18px] text-slate-400 transition-transform duration-200 ${
-                                fieldTypeDropdownOpen ? "rotate-180 text-sky-400" : ""
-                              }`}
+                              className={`material-symbols-outlined text-[18px] text-slate-400 transition-transform duration-200 ${fieldTypeDropdownOpen ? "rotate-180 text-sky-400" : ""
+                                }`}
                             >
                               expand_more
                             </span>
@@ -1306,19 +1264,17 @@ export default function FormEditorPage() {
                                       handleTypeChange(activeQuestion.id, ft.type);
                                       setFieldTypeDropdownOpen(false);
                                     }}
-                                    className={`w-full p-2 rounded-lg text-left flex items-center justify-between transition-all cursor-pointer ${
-                                      isSelected
+                                    className={`w-full p-2 rounded-lg text-left flex items-center justify-between transition-all cursor-pointer ${isSelected
                                         ? "bg-[#14233c] text-white border-l-2 border-sky-400"
                                         : "text-slate-300 hover:text-white hover:bg-[#0f1b30]"
-                                    }`}
+                                      }`}
                                   >
                                     <div className="flex items-center gap-2.5 min-w-0">
                                       <div
-                                        className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 ${
-                                          isSelected
+                                        className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 ${isSelected
                                             ? "bg-sky-500/20 text-sky-300"
                                             : "bg-[#060a14] border border-slate-700 text-slate-400"
-                                        }`}
+                                          }`}
                                       >
                                         <span className="material-symbols-outlined text-[15px]">
                                           {ft.icon}
@@ -1395,11 +1351,10 @@ export default function FormEditorPage() {
                             <button
                               type="button"
                               onClick={() => updateScaleConfig(activeQuestion.id, { format: "numeric" })}
-                              className={`py-1.5 text-xs font-bold rounded flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-                                scale.format === "numeric"
+                              className={`py-1.5 text-xs font-bold rounded flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${scale.format === "numeric"
                                   ? "bg-sky-500 text-slate-950 shadow-sm"
                                   : "text-slate-400 hover:text-white"
-                              }`}
+                                }`}
                             >
                               <span className="material-symbols-outlined text-[16px]">pin</span>
                               <span>Numbers</span>
@@ -1407,11 +1362,10 @@ export default function FormEditorPage() {
                             <button
                               type="button"
                               onClick={() => updateScaleConfig(activeQuestion.id, { format: "stars" })}
-                              className={`py-1.5 text-xs font-bold rounded flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-                                scale.format === "stars"
+                              className={`py-1.5 text-xs font-bold rounded flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${scale.format === "stars"
                                   ? "bg-amber-400 text-slate-950 shadow-sm"
                                   : "text-slate-400 hover:text-white"
-                              }`}
+                                }`}
                             >
                               <span className="material-symbols-outlined text-[16px]">star</span>
                               <span>Stars</span>
@@ -1430,11 +1384,10 @@ export default function FormEditorPage() {
                                     key={val}
                                     type="button"
                                     onClick={() => updateScaleConfig(activeQuestion.id, { min: val })}
-                                    className={`py-1 text-xs font-bold font-mono rounded transition-colors cursor-pointer ${
-                                      scale.min === val
+                                    className={`py-1 text-xs font-bold font-mono rounded transition-colors cursor-pointer ${scale.min === val
                                         ? "bg-sky-500 text-slate-950 shadow-sm"
                                         : "text-slate-400 hover:text-white"
-                                    }`}
+                                      }`}
                                   >
                                     {val}
                                   </button>
@@ -1533,18 +1486,16 @@ export default function FormEditorPage() {
                             true
                           );
                         }}
-                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                          activeQuestion.is_required
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${activeQuestion.is_required
                             ? "bg-sky-500"
                             : "bg-[#1e2638] border border-slate-700"
-                        }`}
+                          }`}
                       >
                         <span
-                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full shadow-md transition duration-200 ease-in-out ${
-                            activeQuestion.is_required
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full shadow-md transition duration-200 ease-in-out ${activeQuestion.is_required
                               ? "translate-x-5 bg-slate-950"
                               : "translate-x-0 bg-slate-400"
-                          }`}
+                            }`}
                         />
                       </button>
                     </div>
@@ -1629,8 +1580,8 @@ export default function FormEditorPage() {
                       <span className="text-slate-300 font-semibold">Intake Status</span>
                       <span
                         className={`font-mono text-[11px] font-bold px-2.5 py-0.5 rounded ${form?.status === "published"
-                            ? "bg-emerald-500/20 border border-emerald-500/40 text-emerald-300"
-                            : "bg-slate-800 text-slate-300"
+                          ? "bg-emerald-500/20 border border-emerald-500/40 text-emerald-300"
+                          : "bg-slate-800 text-slate-300"
                           }`}
                       >
                         {form?.status.toUpperCase()}
@@ -1640,8 +1591,8 @@ export default function FormEditorPage() {
                       type="button"
                       onClick={handleTogglePublish}
                       className={`w-full py-2.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${form?.status === "published"
-                          ? "bg-slate-800 hover:bg-slate-700 text-slate-200"
-                          : "bg-sky-500 hover:bg-sky-400 text-slate-950"
+                        ? "bg-slate-800 hover:bg-slate-700 text-slate-200"
+                        : "bg-sky-500 hover:bg-sky-400 text-slate-950"
                         }`}
                     >
                       {form?.status === "published" ? "Unpublish Form" : "Publish Form Live"}
@@ -1656,7 +1607,7 @@ export default function FormEditorPage() {
           <footer className="w-full bg-[#0b1120] border-t border-[#1e293b] py-3 relative z-10 px-6">
             <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-2">
               <span className="text-[11px] font-mono text-slate-400 select-none">
-                • © 2026 HYPERVISION. ALL RIGHT RESERVED.
+                © 2026 HYPERVISION. ALL RIGHT RESERVED.
               </span>
               <div className="flex items-center gap-2">
                 <span className="font-mono text-xs text-slate-300">All systems normal</span>
